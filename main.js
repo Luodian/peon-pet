@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, Menu, protocol, net } = require('electron');
+const { app, BrowserWindow, screen, Menu, protocol, net, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -12,52 +12,199 @@ const {
 let win;
 let petVisible = true;
 
-// --- Character system ---
-// Canonical asset names → orc bundled filenames
-const ORC_FILE_MAP = {
-  'sprite-atlas.png': 'orc-sprite-atlas.png',
-  'borders.png':      'orc-borders.png',
-  'bg.png':           'bg-pixel.png',
-  'dock-icon.png':    'orc-dock-icon.png',
+const CHARACTERS = {
+  'sleeping-orc': {
+    label: 'Sleeping Orc',
+    atlas: 'orc-sprite-atlas.png',
+    cols: 6, rows: 6,
+    needsChromaKey: false,
+    anims: {
+      sleeping:  { row: 0, frames: 6, fps: 3,  loop: true  },
+      waking:    { row: 1, frames: 6, fps: 2,  loop: false, loops: 1 },
+      typing:    { row: 2, frames: 6, fps: 8,  loop: true  },
+      alarmed:   { row: 3, frames: 6, fps: 8,  loop: false },
+      celebrate: { row: 4, frames: 6, fps: 8,  loop: false },
+      annoyed:   { row: 5, frames: 6, fps: 8,  loop: false },
+    },
+  },
+  'laptop-guy': {
+    label: 'Laptop Guy',
+    atlas: 'laptop-guy-atlas.png',
+    cols: 6, rows: 4,
+    needsChromaKey: false,
+    anims: {
+      sleeping:  { row: 0, frames: 6, fps: 3,  loop: true  },
+      waking:    { row: 1, frames: 6, fps: 4,  loop: false, loops: 1 },
+      typing:    { row: 2, frames: 6, fps: 6,  loop: true  },
+      alarmed:   { row: 3, frames: 6, fps: 6,  loop: false },
+      celebrate: { row: 1, frames: 6, fps: 6,  loop: false },
+      annoyed:   { row: 3, frames: 6, fps: 8,  loop: false },
+    },
+  },
+  'standing-orc': {
+    label: 'Standing Orc',
+    atlas: 'orc-atlas.png',
+    cols: 10, rows: 6,
+    needsChromaKey: true,
+    anims: {
+      sleeping:  { row: 0, frames: 10, fps: 3,  loop: true  },
+      waking:    { row: 4, frames: 10, fps: 6,  loop: false, loops: 1 },
+      typing:    { row: 3, frames: 10, fps: 8,  loop: true  },
+      alarmed:   { row: 5, frames: 9,  fps: 8,  loop: false },
+      celebrate: { row: 2, frames: 10, fps: 8,  loop: false },
+      annoyed:   { row: 1, frames: 10, fps: 6,  loop: false },
+    },
+  },
+  'gemini-cat': {
+    label: 'Mimi',
+    atlas: 'Gemini_Generated_Image_4tsnjt4tsnjt4tsn.png',
+    cols: 6, rows: 6,
+    needsChromaKey: false,
+    anims: {
+      sleeping:  { row: 0, frames: 6, fps: 3,  loop: true  },
+      waking:    { row: 1, frames: 6, fps: 4,  loop: false, loops: 1 },
+      typing:    { row: 2, frames: 6, fps: 8,  loop: true  },
+      alarmed:   { row: 3, frames: 6, fps: 8,  loop: false },
+      celebrate: { row: 4, frames: 6, fps: 8,  loop: false },
+      annoyed:   { row: 5, frames: 6, fps: 8,  loop: false },
+    },
+  },
 };
+
+const CONFIG_FILE = path.join(os.homedir(), '.config', 'peon-pet', 'config.json');
 
 function loadPetConfig() {
   try {
-    return JSON.parse(fs.readFileSync(
-      path.join(app.getPath('userData'), 'peon-pet-config.json'), 'utf8'
-    ));
+    return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
   } catch { return {}; }
 }
 
+function savePetConfig(cfg) {
+  const dir = path.dirname(CONFIG_FILE);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(cfg, null, 2));
+}
+
+function getActiveCharId() {
+  return loadPetConfig().character || 'laptop-guy';
+}
+
 function registerCharacterProtocol() {
-  const cfg = loadPetConfig();
-  const char = cfg.character || 'orc';
-  const orcAssetsDir = path.join(__dirname, 'renderer', 'assets');
-  const customCharDir = path.join(app.getPath('userData'), 'characters', char);
+  const assetsDir = path.join(__dirname, 'renderer', 'assets');
+  const fallback = { 'borders.png': 'orc-borders.png', 'bg.png': 'bg-pixel.png', 'dock-icon.png': 'orc-dock-icon.png' };
 
-  protocol.handle('peon-asset', (request) => {
+  protocol.handle('peon-asset', async (request) => {
     const filename = new URL(request.url).hostname;
-    // For custom character: try custom dir first, fall back to orc
-    if (char !== 'orc' && fs.existsSync(path.join(customCharDir, filename))) {
-      return net.fetch('file://' + path.join(customCharDir, filename));
+    let filePath;
+    if (filename === 'sprite-atlas.png') {
+      const charId = getActiveCharId();
+      const charDef = CHARACTERS[charId] || CHARACTERS['laptop-guy'];
+      filePath = path.join(assetsDir, charDef.atlas);
+    } else {
+      filePath = path.join(assetsDir, fallback[filename] || filename);
     }
-    // Default orc: map canonical → actual filename
-    const orcFile = ORC_FILE_MAP[filename] || filename;
-    return net.fetch('file://' + path.join(orcAssetsDir, orcFile));
+    const res = await net.fetch('file://' + filePath);
+    return new Response(res.body, {
+      status: res.status,
+      headers: {
+        'Content-Type': res.headers.get('content-type') || 'application/octet-stream',
+        'Cache-Control': 'no-store',
+      },
+    });
   });
-
-  return { char, orcAssetsDir, customCharDir };
 }
 
 // Path to peon-ping state file
 const STATE_FILE = path.join(os.homedir(), '.claude', 'hooks', 'peon-ping', '.state.json');
+const PAUSED_FILE = path.join(os.homedir(), '.config', 'opencode', 'peon-ping', '.paused');
+
+ipcMain.handle('get-sound-state', () => !fs.existsSync(PAUSED_FILE));
+ipcMain.handle('toggle-sound', () => {
+  const paused = fs.existsSync(PAUSED_FILE);
+  if (paused) {
+    fs.unlinkSync(PAUSED_FILE);
+  } else {
+    fs.writeFileSync(PAUSED_FILE, '');
+  }
+  return !paused;
+});
+
+ipcMain.handle('get-character-config', () => {
+  const charId = getActiveCharId();
+  const charDef = CHARACTERS[charId] || CHARACTERS['laptop-guy'];
+  return { charId, ...charDef };
+});
+
+ipcMain.handle('get-volume', () => {
+  const cfg = loadPetConfig();
+  return cfg.volume ?? 0.3;
+});
+
+ipcMain.on('show-context-menu', () => {
+  if (!win || win.isDestroyed()) return;
+  const cfg = loadPetConfig();
+  const currentChar = cfg.character || 'laptop-guy';
+  const currentVol = cfg.volume ?? 0.3;
+  const soundOn = !fs.existsSync(PAUSED_FILE);
+
+  const charItems = Object.entries(CHARACTERS).map(([id, def]) => ({
+    label: `${currentChar === id ? '● ' : '   '}${def.label}`,
+    click() {
+      const c = loadPetConfig();
+      c.character = id;
+      savePetConfig(c);
+      if (win && !win.isDestroyed()) {
+        win.webContents.send('switch-character', { charId: id, ...CHARACTERS[id], cacheBust: Date.now() });
+      }
+    },
+  }));
+
+  const volSteps = [0.1, 0.2, 0.3, 0.5, 0.7, 1.0];
+  const volItems = volSteps.map(v => ({
+    label: `${Math.abs(currentVol - v) < 0.01 ? '● ' : '   '}${Math.round(v * 100)}%`,
+    click() {
+      const c = loadPetConfig();
+      c.volume = v;
+      savePetConfig(c);
+      try {
+        const ppCfg = path.join(os.homedir(), '.config', 'opencode', 'peon-ping', 'config.json');
+        const pp = JSON.parse(fs.readFileSync(ppCfg, 'utf8'));
+        pp.volume = v;
+        fs.writeFileSync(ppCfg, JSON.stringify(pp, null, 2));
+      } catch {}
+    },
+  }));
+
+  const template = [
+    { label: soundOn ? '🔊 Sound On' : '🔇 Sound Off', click() {
+      const paused = fs.existsSync(PAUSED_FILE);
+      if (paused) fs.unlinkSync(PAUSED_FILE);
+      else fs.writeFileSync(PAUSED_FILE, '');
+    }},
+    { type: 'separator' },
+    { label: 'Volume', submenu: volItems },
+    { type: 'separator' },
+    { label: 'Character', submenu: charItems },
+    { type: 'separator' },
+    { label: petVisible ? 'Hide Pet' : 'Show Pet', click() {
+      if (!win || win.isDestroyed()) return;
+      if (petVisible) win.hide(); else win.show();
+      petVisible = !petVisible;
+      if (process.platform === 'darwin') app.dock.setMenu(buildDockMenu());
+    }},
+    { label: 'Quit', click() { app.quit(); } },
+  ];
+
+  const menu = Menu.buildFromTemplate(template);
+  menu.popup({ window: win });
+});
 
 let lastTimestamp = 0;
 
 const tracker = createSessionTracker();
 const sessionCwds = new Map();  // session_id → cwd string
 const SESSION_PRUNE_MS = 10 * 60 * 1000;  // 10min — prune cold sessions
-const HOT_MS  = 30 * 1000;       // 30s  — actively working right now
+const HOT_MS  = 120 * 1000;      // 120s — actively working right now
 const WARM_MS = 2 * 60 * 1000;   // 2min — session open but idle
 
 function readStateFile() {
@@ -164,18 +311,22 @@ function buildDockMenu() {
 
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
+  const saved = loadPetConfig().window;
 
   win = new BrowserWindow({
-    width: 200,
-    height: 200,
-    x: 20,
-    y: height - 220,
+    width:  saved?.w || 150,
+    height: saved?.h || 150,
+    x: saved?.x ?? (width - 170),
+    y: saved?.y ?? (height - 170),
     transparent: true,
     frame: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    resizable: false,
+    resizable: true,
     focusable: false,
+    movable: true,
+    minWidth: 80,
+    minHeight: 80,
     hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

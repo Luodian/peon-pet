@@ -1,17 +1,10 @@
 import * as THREE from '../node_modules/three/build/three.module.js';
 
-// --- Config ---
-const ATLAS_COLS = 6;
-const ATLAS_ROWS = 6;
-
-const ANIM_CONFIG = {
-  sleeping:  { row: 0, frames: 6, fps: 3,  loop: true  },
-  waking:    { row: 1, frames: 6, fps: 2,  loop: false, loops: 1 },
-  typing:    { row: 2, frames: 6, fps: 8,  loop: false },
-  alarmed:   { row: 3, frames: 6, fps: 8,  loop: false },
-  celebrate: { row: 4, frames: 6, fps: 8,  loop: false },
-  annoyed:   { row: 5, frames: 6, fps: 8,  loop: false },
-};
+const charCfg = await window.peonBridge.getCharacterConfig();
+let ATLAS_COLS = charCfg.cols;
+let ATLAS_ROWS = charCfg.rows;
+let ANIM_CONFIG = charCfg.anims;
+const USE_CHROMA_KEY = charCfg.needsChromaKey || false;
 
 // --- Scene setup ---
 const canvas = document.getElementById('c');
@@ -20,20 +13,38 @@ const renderer = new THREE.WebGLRenderer({
   alpha: true,
   antialias: false,
 });
-renderer.setSize(200, 200);
+renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setClearColor(0x000000, 0);
 
 const scene = new THREE.Scene();
 
-const camera = new THREE.OrthographicCamera(-100, 100, 100, -100, 0.1, 10);
+const halfW = window.innerWidth / 2;
+const halfH = window.innerHeight / 2;
+const camera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 10);
+
+function onResize() {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  renderer.setSize(w, h);
+  camera.left = -w / 2;
+  camera.right = w / 2;
+  camera.top = h / 2;
+  camera.bottom = -h / 2;
+  camera.updateProjectionMatrix();
+  const s = Math.min(w, h) / 200;
+  bgMesh.scale.set(s, s, 1);
+  sprite.scale.set(s, s, 1);
+  if (flashMesh) flashMesh.scale.set(s, s, 1);
+  if (borderMesh) borderMesh.scale.set(s, s, 1);
+}
+window.addEventListener('resize', onResize);
 camera.position.z = 1;
 
 // --- Background ---
-const bgTex = new THREE.TextureLoader().load('peon-asset://bg.png');
 const bgMesh = new THREE.Mesh(
   new THREE.PlaneGeometry(180, 180),
-  new THREE.MeshBasicMaterial({ map: bgTex, color: 0x888888 })
+  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 })
 );
 bgMesh.position.z = -0.5;
 scene.add(bgMesh);
@@ -47,12 +58,45 @@ const atlas = loader.load('peon-asset://sprite-atlas.png', () => {
   atlas.needsUpdate = true;
 });
 
-// Square sprite — fills most of the 200×200 window
 const geometry = new THREE.PlaneGeometry(180, 180);
-const material = new THREE.MeshBasicMaterial({
-  map: atlas,
+
+const SPRITE_VERT = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const SPRITE_FRAG_NORMAL = `
+  uniform sampler2D map;
+  varying vec2 vUv;
+  void main() {
+    vec4 c = texture2D(map, vUv);
+    if (c.a < 0.01) discard;
+    gl_FragColor = c;
+  }
+`;
+const SPRITE_FRAG_CHROMA = `
+  uniform sampler2D map;
+  varying vec2 vUv;
+  void main() {
+    vec4 c = texture2D(map, vUv);
+    float gray = (c.r + c.g + c.b) / 3.0;
+    float diffR = abs(c.r - c.g) + abs(c.r - c.b);
+    bool isGray = diffR < 0.06;
+    bool isLight = isGray && gray > 0.7 && gray < 0.82;
+    bool isDark  = isGray && gray > 0.45 && gray < 0.58;
+    if (isLight || isDark) discard;
+    gl_FragColor = c;
+  }
+`;
+
+const material = new THREE.ShaderMaterial({
+  uniforms: { map: { value: atlas } },
+  vertexShader: SPRITE_VERT,
+  fragmentShader: USE_CHROMA_KEY ? SPRITE_FRAG_CHROMA : SPRITE_FRAG_NORMAL,
   transparent: true,
-  alphaTest: 0.01,
+  depthTest: false,
 });
 const sprite = new THREE.Mesh(geometry, material);
 scene.add(sprite);
@@ -104,6 +148,9 @@ const borderMesh = new THREE.Mesh(
 );
 borderMesh.position.z = 0.4;
 scene.add(borderMesh);
+
+// --- Apply initial scaling for non-200px windows ---
+onResize();
 
 // --- Session dots (glowing orbs) ---
 const MAX_DOTS = 10;
@@ -276,7 +323,7 @@ let pendingIdle = false;
 let remainingLoops = 0;  // extra replays for non-sleeping anims
 const REACTION_LOOPS = 3;  // play reaction animations 3x before sleeping
 let idleTimer = null;
-const IDLE_TIMEOUT_MS = 30000;
+const IDLE_TIMEOUT_MS = 120000;
 
 function resetIdleTimer() {
   if (idleTimer) clearTimeout(idleTimer);
@@ -390,11 +437,34 @@ window.peonBridge.onSessionUpdate(({ sessions }) => {
   currentSessions = sessions;
   updateDots(sessions);
   const wasActive = anySessionActive;
-  anySessionActive = sessions.some(s => s.hot);
+  anySessionActive = sessions.some(s => s.hot || s.warm);
   // If a session just became hot and orc is sleeping, wake him to typing
   if (anySessionActive && !wasActive && currentAnim === 'sleeping') {
     playAnim('typing');
   }
+});
+
+// --- Character hot-swap (no page reload) ---
+window.peonBridge.onSwitchCharacter((cfg) => {
+  // Load new texture first; swap everything atomically in the callback
+  // so the old character keeps rendering until the new one is ready.
+  const newAtlas = loader.load(`peon-asset://sprite-atlas.png?t=${cfg.cacheBust}`, () => {
+    newAtlas.magFilter = THREE.NearestFilter;
+    newAtlas.minFilter = THREE.NearestFilter;
+    newAtlas.generateMipmaps = false;
+    newAtlas.needsUpdate = true;
+
+    ATLAS_COLS = cfg.cols;
+    ATLAS_ROWS = cfg.rows;
+    ANIM_CONFIG = cfg.anims;
+    material.uniforms.map.value = newAtlas;
+    material.fragmentShader = (cfg.needsChromaKey || false)
+      ? SPRITE_FRAG_CHROMA
+      : SPRITE_FRAG_NORMAL;
+    material.needsUpdate = true;
+
+    playAnim('sleeping');
+  });
 });
 
 // --- Render loop ---
@@ -483,4 +553,11 @@ function animate(time) {
 
   renderer.render(scene, camera);
 }
+
+// --- Sound toggle button ---
+window.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  window.peonBridge.showContextMenu();
+});
+playAnim('sleeping');
 requestAnimationFrame(animate);

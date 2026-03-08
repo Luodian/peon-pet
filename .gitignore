@@ -1,4 +1,5 @@
 node_modules/
+.worktrees/
 dist/
 *.log
 # Raw generation artifacts (intermediate files from sprite/image generation)
