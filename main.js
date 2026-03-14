@@ -116,7 +116,9 @@ function registerCharacterProtocol() {
 
 // Path to peon-ping state file
 const STATE_FILE = path.join(os.homedir(), '.claude', 'hooks', 'peon-ping', '.state.json');
-const PAUSED_FILE = path.join(os.homedir(), '.config', 'opencode', 'peon-ping', '.paused');
+const PAUSED_FILE = path.join(os.homedir(), '.claude', 'hooks', 'peon-ping', '.paused');
+// Session tracking file (written by session-hook.py)
+const SESSIONS_FILE = path.join(os.homedir(), '.config', 'peon-pet', 'sessions.json');
 
 ipcMain.handle('get-sound-state', () => !fs.existsSync(PAUSED_FILE));
 ipcMain.handle('toggle-sound', () => {
@@ -167,7 +169,7 @@ ipcMain.on('show-context-menu', () => {
       c.volume = v;
       savePetConfig(c);
       try {
-        const ppCfg = path.join(os.homedir(), '.config', 'opencode', 'peon-ping', 'config.json');
+        const ppCfg = path.join(os.homedir(), '.claude', 'hooks', 'peon-ping', 'config.json');
         const pp = JSON.parse(fs.readFileSync(ppCfg, 'utf8'));
         pp.volume = v;
         fs.writeFileSync(ppCfg, JSON.stringify(pp, null, 2));
@@ -185,6 +187,8 @@ ipcMain.on('show-context-menu', () => {
     { label: 'Volume', submenu: volItems },
     { type: 'separator' },
     { label: 'Character', submenu: charItems },
+    { type: 'separator' },
+    { label: 'Sessions', submenu: buildSessionMenuItems() },
     { type: 'separator' },
     { label: petVisible ? 'Hide Pet' : 'Show Pet', click() {
       if (!win || win.isDestroyed()) return;
@@ -214,6 +218,89 @@ function readStateFile() {
   } catch {
     return null;
   }
+}
+
+function readSessionsFile() {
+  try {
+    return JSON.parse(fs.readFileSync(SESSIONS_FILE, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function formatTimeAgo(ms) {
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ago`;
+}
+
+function buildSessionMenuItems() {
+  const sessions = readSessionsFile();
+  const now = Date.now() / 1000;
+  const items = [];
+
+  // Categorise sessions
+  const running = [];  // active within last 2 min
+  const idle = [];     // 2 min – 1 hr ago
+  const ended = [];    // ended or > 1 hr since last event
+
+  for (const [id, s] of Object.entries(sessions)) {
+    const age = now - (s.last_event_at || 0);
+    const label = s.project || path.basename(s.cwd || '') || id.slice(0, 8);
+    const typeTag = s.type === 'subagent' ? ' (agent)' : '';
+    const entry = { id, label, typeTag, age, ...s };
+
+    if (s.ended) {
+      ended.push(entry);
+    } else if (age < 120) {
+      running.push(entry);
+    } else if (age < 3600) {
+      idle.push(entry);
+    } else {
+      ended.push(entry);
+    }
+  }
+
+  if (running.length === 0 && idle.length === 0 && ended.length === 0) {
+    return [{ label: 'No sessions', enabled: false }];
+  }
+
+  if (running.length > 0) {
+    items.push({ label: '— Running —', enabled: false });
+    for (const s of running.sort((a, b) => a.age - b.age)) {
+      items.push({
+        label: `🟢 ${s.label}${s.typeTag}  ${formatTimeAgo(s.age * 1000)}`,
+        enabled: false,
+      });
+    }
+  }
+
+  if (idle.length > 0) {
+    if (items.length > 0) items.push({ type: 'separator' });
+    items.push({ label: '— Idle —', enabled: false });
+    for (const s of idle.sort((a, b) => a.age - b.age)) {
+      items.push({
+        label: `🟡 ${s.label}${s.typeTag}  ${formatTimeAgo(s.age * 1000)}`,
+        enabled: false,
+      });
+    }
+  }
+
+  if (ended.length > 0) {
+    if (items.length > 0) items.push({ type: 'separator' });
+    items.push({ label: '— Ended —', enabled: false });
+    for (const s of ended.sort((a, b) => a.age - b.age).slice(0, 10)) {
+      items.push({
+        label: `⚫ ${s.label}${s.typeTag}  ${formatTimeAgo(s.age * 1000)}`,
+        enabled: false,
+      });
+    }
+  }
+
+  return items;
 }
 
 function startPolling() {
@@ -269,6 +356,32 @@ function startPolling() {
       win.webContents.send('peon-event', { anim, event });
     }
   }, 200);
+
+  // Also poll sessions file for sub-agent activity (keeps pet awake)
+  setInterval(() => {
+    if (!win || win.isDestroyed()) return;
+    const sessions = readSessionsFile();
+    const now = Date.now() / 1000;
+    const hasActive = Object.values(sessions).some(
+      s => !s.ended && (now - (s.last_event_at || 0)) < 120
+    );
+    if (hasActive) {
+      // Touch the tracker to keep sessions warm (prevents pet from sleeping)
+      // Find any session_id from the sessions file that's active
+      for (const [id, s] of Object.entries(sessions)) {
+        if (!s.ended && (now - (s.last_event_at || 0)) < 120 && isValidSessionId(id)) {
+          tracker.update(id, Date.now());
+          if (s.cwd) sessionCwds.set(id, s.cwd);
+        }
+      }
+      const sessStates = buildSessionStates(tracker.entries(), Date.now(), HOT_MS, WARM_MS, 10);
+      const sessionsWithCwd = sessStates.map(ss => ({
+        ...ss,
+        cwd: sessionCwds.get(ss.id) || null,
+      }));
+      win.webContents.send('session-update', { sessions: sessionsWithCwd });
+    }
+  }, 1000);
 }
 
 // Poll cursor position to enable mouse events only when hovering the window.
