@@ -71,15 +71,30 @@ const geometry = new THREE.PlaneGeometry(180, 180);
 
 const SPRITE_VERT = `
   varying vec2 vUv;
+  varying vec2 vLocalPos;
   void main() {
     vUv = uv;
+    // Normalize plane position (-90..90) to 0..1
+    vLocalPos = position.xy / 180.0 + 0.5;
     gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
   }
 `;
+
+// Rounded rectangle discard — shared by both fragment shaders
+const ROUND_RECT_FUNC = `
+  float roundedRect(vec2 p, float r) {
+    vec2 q = abs(p - 0.5) - (0.5 - r);
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
+  }
+`;
+
 const SPRITE_FRAG_NORMAL = `
   uniform sampler2D map;
   varying vec2 vUv;
+  varying vec2 vLocalPos;
+  ${ROUND_RECT_FUNC}
   void main() {
+    if (roundedRect(vLocalPos, 0.06) > 0.0) discard;
     vec4 c = texture2D(map, vUv);
     if (c.a < 0.01) discard;
     gl_FragColor = c;
@@ -88,7 +103,10 @@ const SPRITE_FRAG_NORMAL = `
 const SPRITE_FRAG_CHROMA = `
   uniform sampler2D map;
   varying vec2 vUv;
+  varying vec2 vLocalPos;
+  ${ROUND_RECT_FUNC}
   void main() {
+    if (roundedRect(vLocalPos, 0.06) > 0.0) discard;
     vec4 c = texture2D(map, vUv);
     float gray = (c.r + c.g + c.b) / 3.0;
     float diffR = abs(c.r - c.g) + abs(c.r - c.b);
