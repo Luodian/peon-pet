@@ -465,7 +465,7 @@ function escHtml(str) {
 function renderSidebar(sessions) {
   if (!sidebar.classList.contains('visible')) return;
   if (!sessions || Object.keys(sessions).length === 0) {
-    sidebar.innerHTML = '<div class="sessions-empty">No sessions</div>';
+    sidebar.innerHTML = '<div class="sessions-empty">No sessions</div><div class="sidebar-spacer"></div>';
     return;
   }
   const now = Date.now() / 1000;
@@ -481,21 +481,25 @@ function renderSidebar(sessions) {
     else ended.push(entry);
   }
   let html = '';
+  const row = (dotClass, nameClass, s) =>
+    `<div class="session-row"><span class="sdot ${dotClass}"></span><span class="session-name ${nameClass}">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+
   if (running.length > 0) {
     html += '<div class="section-label">Running</div>';
     for (const s of running.sort((a, b) => a.age - b.age))
-      html += `<div class="session-row"><span class="sdot running"></span><span class="session-name">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+      html += row('running', 'running-name', s);
   }
   if (idle.length > 0) {
     html += '<div class="section-label">Idle</div>';
     for (const s of idle.sort((a, b) => a.age - b.age))
-      html += `<div class="session-row"><span class="sdot idle"></span><span class="session-name">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+      html += row('idle', '', s);
   }
   if (ended.length > 0) {
     html += '<div class="section-label">Ended</div>';
-    for (const s of ended.sort((a, b) => a.age - b.age).slice(0, 10))
-      html += `<div class="session-row"><span class="sdot ended"></span><span class="session-name">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+    for (const s of ended.sort((a, b) => a.age - b.age).slice(0, 8))
+      html += row('ended', 'ended-name', s);
   }
+  html += '<div class="sidebar-spacer"></div>';
   sidebar.innerHTML = html || '<div class="sessions-empty">No sessions</div>';
 }
 
