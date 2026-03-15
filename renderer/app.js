@@ -32,6 +32,9 @@ const halfW = initSize.w / 2;
 const halfH = initSize.h / 2;
 const camera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 10);
 
+let petScale = 1.0;
+let currentSessions = [];
+
 function onResize() {
   const { w, h } = getPetSize();
   document.documentElement.style.setProperty('--pet-size', h + 'px');
@@ -42,10 +45,12 @@ function onResize() {
   camera.bottom = -h / 2;
   camera.updateProjectionMatrix();
   const s = Math.min(w, h) / 200;
+  petScale = s;
   bgMesh.scale.set(s, s, 1);
   sprite.scale.set(s, s, 1);
   if (flashMesh) flashMesh.scale.set(s, s, 1);
   if (borderMesh) borderMesh.scale.set(s, s, 1);
+  layoutDots();
 }
 window.addEventListener('resize', onResize);
 camera.position.z = 1;
@@ -166,9 +171,6 @@ setupFlash();
 // --- Border overlay (disabled — using borderless look) ---
 const borderMesh = null;
 
-// --- Apply initial scaling for non-200px windows ---
-onResize();
-
 // --- Session dots (glowing orbs) ---
 const MAX_DOTS = 10;
 const DOT_SIZE = 12;
@@ -224,10 +226,24 @@ for (let i = 0; i < MAX_DOTS; i++) {
   dotStates.push({ active: false });
 }
 
-function updateDots(sessions) {
-  const count = Math.min(sessions.length, MAX_DOTS);
+// --- Apply initial scaling for non-200px windows ---
+onResize();
+
+function layoutDots() {
+  if (dotMeshes.length === 0) return;
+  const count = Math.min(currentSessions.length, MAX_DOTS);
   const totalWidth = count * DOT_SIZE + Math.max(0, count - 1) * DOT_GAP;
   const startX = -totalWidth / 2 + DOT_SIZE / 2;
+  for (let i = 0; i < count; i++) {
+    const mesh = dotMeshes[i];
+    mesh.position.x = (startX + i * (DOT_SIZE + DOT_GAP)) * petScale;
+    mesh.position.y = DOT_Y * petScale;
+    mesh.scale.set(petScale, petScale, 1);
+  }
+}
+
+function updateDots(sessions) {
+  const count = Math.min(sessions.length, MAX_DOTS);
 
   for (let i = 0; i < MAX_DOTS; i++) {
     const mesh = dotMeshes[i];
@@ -235,8 +251,6 @@ function updateDots(sessions) {
     if (i < count) {
       const { hot, warm } = sessions[i];
       dotStates[i].active = hot;
-      mesh.position.x = startX + i * (DOT_SIZE + DOT_GAP);
-      mesh.position.y = DOT_Y;
       // hot = bright green pulsing, warm = dim green static, else grey
       u.dotColor.value.set(hot ? 0x44ff44 : warm ? 0x1a4d1a : 0x333333);
       u.visible.value = 1.0;
@@ -245,6 +259,7 @@ function updateDots(sessions) {
       u.visible.value = 0.0;
     }
   }
+  layoutDots();
 }
 
 function triggerFlash(r, g, b, intensity = 0.6, decay = 3.0) {
@@ -386,20 +401,20 @@ playAnim('sleeping');
 
 // --- Tooltip ---
 const tooltip = document.getElementById('tooltip');
-let currentSessions = [];
 
 function hitTestDots(px, py) {
   const count = Math.min(currentSessions.length, MAX_DOTS);
   if (count === 0) return -1;
-  const totalWidth = count * DOT_SIZE + Math.max(0, count - 1) * DOT_GAP;
-  const startThreeX = -totalWidth / 2 + DOT_SIZE / 2;
-  const dotCanvasY = 100 - DOT_Y;  // Three.js DOT_Y=88 → canvas pixel y=12
-  const HIT_R = DOT_SIZE;           // slightly wider than visual for easier hover
+  const { h } = getPetSize();
+  const half = h / 2;
+  // Convert CSS pixel coords to Three.js world coords
+  const worldX = px - half;
+  const worldY = half - py;
+  const hitR = DOT_SIZE * petScale;
   for (let i = 0; i < count; i++) {
-    const dotCanvasX = startThreeX + i * (DOT_SIZE + DOT_GAP) + 100;
-    const dx = px - dotCanvasX;
-    const dy = py - dotCanvasY;
-    if (dx * dx + dy * dy < HIT_R * HIT_R) return i;
+    const dx = worldX - dotMeshes[i].position.x;
+    const dy = worldY - dotMeshes[i].position.y;
+    if (dx * dx + dy * dy < hitR * hitR) return i;
   }
   return -1;
 }
@@ -430,11 +445,12 @@ canvas.addEventListener('mousemove', (e) => {
   }
   tooltip.innerHTML = html;
   tooltip.style.display = 'block';
-  // Position tooltip: prefer to the right/below cursor, clamped inside window
+  // Position tooltip: prefer to the right/below cursor, clamped inside pet area
+  const petH = getPetSize().h;
   const tw = tooltip.offsetWidth;
   const th = tooltip.offsetHeight;
-  tooltip.style.left = Math.min(px + 6, 200 - tw - 2) + 'px';
-  tooltip.style.top  = Math.min(py + 6, 200 - th - 2) + 'px';
+  tooltip.style.left = Math.min(px + 6, petH - tw - 2) + 'px';
+  tooltip.style.top  = Math.min(py + 6, petH - th - 2) + 'px';
 });
 
 canvas.addEventListener('mouseleave', () => {

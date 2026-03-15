@@ -235,7 +235,7 @@ let lastTimestamp = 0;
 const tracker = createSessionTracker();
 const sessionCwds = new Map();  // session_id → cwd string
 const SESSION_PRUNE_MS = 10 * 60 * 1000;  // 10min — prune cold sessions
-const HOT_MS  = 120 * 1000;      // 120s — actively working right now
+const HOT_MS  = 30 * 1000;       // 30s — actively working right now
 const WARM_MS = 2 * 60 * 1000;   // 2min — session open but idle
 
 function readStateFile() {
