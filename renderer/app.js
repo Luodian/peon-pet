@@ -504,6 +504,7 @@ function renderSidebar(sessions) {
 
 window.peonBridge.onSessionsToggle((show) => {
   sidebar.classList.toggle('visible', show);
+  document.getElementById('wrapper').classList.toggle('has-sidebar', show);
   if (show) renderSidebar(lastSessionsData);
 });
 
