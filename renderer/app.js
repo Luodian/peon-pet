@@ -34,8 +34,7 @@ const camera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 1
 
 function onResize() {
   const { w, h } = getPetSize();
-  petArea.style.width = w + 'px';
-  petArea.style.height = h + 'px';
+  document.documentElement.style.setProperty('--pet-size', h + 'px');
   renderer.setSize(w, h);
   camera.left = -w / 2;
   camera.right = w / 2;
