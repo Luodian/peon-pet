@@ -264,31 +264,40 @@ function formatTimeAgo(ms) {
   return `${hr}h ago`;
 }
 
+function classifySession(id, s) {
+  const now = Date.now();
+  const trackerEntry = tracker.entries().find(([tid]) => tid === id);
+  const inTracker = !!trackerEntry;
+  const trackerAge = inTracker ? (now - trackerEntry[1]) : Infinity;
+
+  if (s.ended) return 'ended';
+  if (inTracker && trackerAge < HOT_MS) return 'running';
+  if (inTracker && trackerAge < WARM_MS) return 'idle';
+  const fileAge = now / 1000 - (s.last_event_at || 0);
+  return fileAge < 600 ? 'idle' : 'ended';
+}
+
 function buildSessionMenuItems() {
   const sessions = readSessionsFile();
-  const now = Date.now() / 1000;
+  const now = Date.now();
   const items = [];
 
-  // Categorise sessions
-  const running = [];  // active within last 2 min
-  const idle = [];     // 2 min – 1 hr ago
-  const ended = [];    // ended or > 1 hr since last event
+  const running = [];
+  const idle = [];
+  const ended = [];
 
   for (const [id, s] of Object.entries(sessions)) {
-    const age = now - (s.last_event_at || 0);
+    const trackerEntry = tracker.entries().find(([tid]) => tid === id);
+    const inTracker = !!trackerEntry;
+    const age = inTracker ? (now - trackerEntry[1]) / 1000 : (now / 1000 - (s.last_event_at || 0));
     const label = s.project || path.basename(s.cwd || '') || id.slice(0, 8);
     const typeTag = s.type === 'subagent' ? ' (agent)' : '';
     const entry = { id, label, typeTag, age, ...s };
+    const status = classifySession(id, s);
 
-    if (s.ended) {
-      ended.push(entry);
-    } else if (age < 120) {
-      running.push(entry);
-    } else if (age < 3600) {
-      idle.push(entry);
-    } else {
-      ended.push(entry);
-    }
+    if (status === 'running') running.push(entry);
+    else if (status === 'idle') idle.push(entry);
+    else ended.push(entry);
   }
 
   if (running.length === 0 && idle.length === 0 && ended.length === 0) {
@@ -456,8 +465,18 @@ function buildDockMenu() {
 
 function pushSessionsToRenderer() {
   if (!win || win.isDestroyed() || !sessionsVisible) return;
-  const sessions = readSessionsFile();
-  win.webContents.send('sessions-data', { sessions });
+  const fileData = readSessionsFile();
+  const now = Date.now();
+
+  const merged = {};
+  for (const [id, s] of Object.entries(fileData)) {
+    const trackerEntry = tracker.entries().find(([tid]) => tid === id);
+    const inTracker = !!trackerEntry;
+    const age = inTracker ? (now - trackerEntry[1]) / 1000 : (now / 1000 - (s.last_event_at || 0));
+    merged[id] = { ...s, _status: classifySession(id, s), _age: age };
+  }
+
+  win.webContents.send('sessions-data', { sessions: merged });
 }
 
 function createWindow() {

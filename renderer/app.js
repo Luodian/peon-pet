@@ -467,16 +467,15 @@ function renderSidebar(sessions) {
     sidebar.innerHTML = '<div class="sessions-empty">No sessions</div><div class="sidebar-spacer"></div>';
     return;
   }
-  const now = Date.now() / 1000;
   const running = [], idle = [], ended = [];
   for (const [id, s] of Object.entries(sessions)) {
-    const age = now - (s.last_event_at || 0);
     const label = s.project || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8));
     const typeTag = s.type === 'subagent' ? ' (agent)' : '';
+    const age = s._age || 0;
     const entry = { id, label, typeTag, age, ...s };
-    if (s.ended) ended.push(entry);
-    else if (age < 120) running.push(entry);
-    else if (age < 3600) idle.push(entry);
+    const status = s._status || 'ended';
+    if (status === 'running') running.push(entry);
+    else if (status === 'idle') idle.push(entry);
     else ended.push(entry);
   }
   let html = '';
