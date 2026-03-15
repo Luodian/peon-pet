@@ -8,24 +8,34 @@ const USE_CHROMA_KEY = charCfg.needsChromaKey || false;
 
 // --- Scene setup ---
 const canvas = document.getElementById('c');
+const petArea = document.getElementById('pet-area');
 const renderer = new THREE.WebGLRenderer({
   canvas,
   alpha: true,
   antialias: false,
 });
-renderer.setSize(window.innerWidth, window.innerHeight);
+
+function getPetSize() {
+  // Pet area is always square, sized to the window height
+  const h = window.innerHeight;
+  return { w: h, h };
+}
+
+const initSize = getPetSize();
+renderer.setSize(initSize.w, initSize.h);
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setClearColor(0x000000, 0);
 
 const scene = new THREE.Scene();
 
-const halfW = window.innerWidth / 2;
-const halfH = window.innerHeight / 2;
+const halfW = initSize.w / 2;
+const halfH = initSize.h / 2;
 const camera = new THREE.OrthographicCamera(-halfW, halfW, halfH, -halfH, 0.1, 10);
 
 function onResize() {
-  const w = window.innerWidth;
-  const h = window.innerHeight;
+  const { w, h } = getPetSize();
+  petArea.style.width = w + 'px';
+  petArea.style.height = h + 'px';
   renderer.setSize(w, h);
   camera.left = -w / 2;
   camera.right = w / 2;
@@ -136,18 +146,8 @@ async function setupFlash() {
 
 setupFlash();
 
-// --- Border overlay ---
-const borderTex = loader.load('peon-asset://borders.png', () => {
-  borderTex.magFilter = THREE.NearestFilter;
-  borderTex.minFilter = THREE.NearestFilter;
-  borderTex.needsUpdate = true;
-});
-const borderMesh = new THREE.Mesh(
-  new THREE.PlaneGeometry(200, 200),
-  new THREE.MeshBasicMaterial({ map: borderTex, transparent: true, depthTest: false })
-);
-borderMesh.position.z = 0.4;
-scene.add(borderMesh);
+// --- Border overlay (disabled — using borderless look) ---
+const borderMesh = null;
 
 // --- Apply initial scaling for non-200px windows ---
 onResize();
@@ -403,7 +403,7 @@ canvas.addEventListener('mousemove', (e) => {
     const active = currentSessions.filter(s => s.hot).length;
     const total  = currentSessions.length;
     if (total === 0) {
-      html = 'Peon Pet';
+      html = 'Pet';
     } else {
       const names = currentSessions
         .map(s => s.cwd ? s.cwd.split('/').filter(Boolean).pop() : null)
@@ -443,6 +443,73 @@ window.peonBridge.onSessionUpdate(({ sessions }) => {
     playAnim('typing');
   }
 });
+
+// --- Sessions sidebar ---
+const sidebar = document.getElementById('sessions-sidebar');
+
+function formatTimeAgo(ms) {
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  return `${hr}h ago`;
+}
+
+function escHtml(str) {
+  const d = document.createElement('div');
+  d.textContent = str;
+  return d.innerHTML;
+}
+
+function renderSidebar(sessions) {
+  if (!sidebar.classList.contains('visible')) return;
+  if (!sessions || Object.keys(sessions).length === 0) {
+    sidebar.innerHTML = '<div class="sessions-empty">No sessions</div>';
+    return;
+  }
+  const now = Date.now() / 1000;
+  const running = [], idle = [], ended = [];
+  for (const [id, s] of Object.entries(sessions)) {
+    const age = now - (s.last_event_at || 0);
+    const label = s.project || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8));
+    const typeTag = s.type === 'subagent' ? ' (agent)' : '';
+    const entry = { id, label, typeTag, age, ...s };
+    if (s.ended) ended.push(entry);
+    else if (age < 120) running.push(entry);
+    else if (age < 3600) idle.push(entry);
+    else ended.push(entry);
+  }
+  let html = '';
+  if (running.length > 0) {
+    html += '<div class="section-label">Running</div>';
+    for (const s of running.sort((a, b) => a.age - b.age))
+      html += `<div class="session-row"><span class="sdot running"></span><span class="session-name">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+  }
+  if (idle.length > 0) {
+    html += '<div class="section-label">Idle</div>';
+    for (const s of idle.sort((a, b) => a.age - b.age))
+      html += `<div class="session-row"><span class="sdot idle"></span><span class="session-name">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+  }
+  if (ended.length > 0) {
+    html += '<div class="section-label">Ended</div>';
+    for (const s of ended.sort((a, b) => a.age - b.age).slice(0, 10))
+      html += `<div class="session-row"><span class="sdot ended"></span><span class="session-name">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+  }
+  sidebar.innerHTML = html || '<div class="sessions-empty">No sessions</div>';
+}
+
+window.peonBridge.onSessionsToggle((show) => {
+  sidebar.classList.toggle('visible', show);
+  if (show) renderSidebar(lastSessionsData);
+});
+
+window.peonBridge.onSessionsData((data) => {
+  lastSessionsData = data.sessions;
+  renderSidebar(data.sessions);
+});
+
+let lastSessionsData = {};
 
 // --- Character hot-swap (no page reload) ---
 window.peonBridge.onSwitchCharacter((cfg) => {

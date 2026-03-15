@@ -10,8 +10,9 @@ const {
 } = require('./lib/session-tracker');
 
 let win;
-let sessionPanel;
 let petVisible = true;
+let sessionsVisible = false;
+const SIDEBAR_WIDTH = 200;
 
 const CHARACTERS = {
   'sleeping-orc': {
@@ -147,18 +148,18 @@ ipcMain.handle('get-show-sessions', () => {
   return loadPetConfig().showSessions ?? false;
 });
 
-ipcMain.handle('toggle-sessions-panel', () => {
-  const cfg = loadPetConfig();
-  const show = !(cfg.showSessions ?? false);
-  cfg.showSessions = show;
-  savePetConfig(cfg);
+function toggleSessionsSidebar(show) {
+  if (!win || win.isDestroyed()) return;
+  sessionsVisible = show;
+  const petSize = win.getSize()[1]; // height = pet square size
   if (show) {
-    openSessionPanel();
+    win.setSize(petSize + SIDEBAR_WIDTH, petSize);
   } else {
-    closeSessionPanel();
+    win.setSize(petSize, petSize);
   }
-  return show;
-});
+  win.webContents.send('sessions-toggle', show);
+  if (show) pushSessionsToRenderer();
+}
 
 ipcMain.on('show-context-menu', () => {
   if (!win || win.isDestroyed()) return;
@@ -213,7 +214,7 @@ ipcMain.on('show-context-menu', () => {
       const show = !(c.showSessions ?? false);
       c.showSessions = show;
       savePetConfig(c);
-      if (show) openSessionPanel(); else closeSessionPanel();
+      toggleSessionsSidebar(show);
     }},
     { type: 'separator' },
     { label: petVisible ? 'Hide Pet' : 'Show Pet', click() {
@@ -375,7 +376,7 @@ function startPolling() {
         cwd: sessionCwds.get(s.id) || null,
       }));
       win.webContents.send('session-update', { sessions: sessionsWithCwd });
-      pushSessionsToPanel();
+      pushSessionsToRenderer();
     }
 
     const anim = EVENT_TO_ANIM[event];
@@ -385,7 +386,7 @@ function startPolling() {
   }, 200);
 
   // Periodically refresh the sessions panel so "time ago" stays current
-  setInterval(() => pushSessionsToPanel(), 5000);
+  setInterval(() => pushSessionsToRenderer(), 5000);
 
   // Also poll sessions file for sub-agent activity (keeps pet awake)
   setInterval(() => {
@@ -410,7 +411,7 @@ function startPolling() {
         cwd: sessionCwds.get(ss.id) || null,
       }));
       win.webContents.send('session-update', { sessions: sessionsWithCwd });
-      pushSessionsToPanel();
+      pushSessionsToRenderer();
     }
   }, 1000);
 }
@@ -453,65 +454,10 @@ function buildDockMenu() {
   ]);
 }
 
-const PANEL_WIDTH = 200;
-const PANEL_GAP = -1; // overlap by 1px so borders merge
-
-function getSessionPanelBounds() {
-  if (!win || win.isDestroyed()) return { x: 100, y: 100, h: 150 };
-  const [wx, wy] = win.getPosition();
-  const [ww, wh] = win.getSize();
-  return { x: wx + ww + PANEL_GAP, y: wy, h: wh };
-}
-
-function openSessionPanel() {
-  if (sessionPanel && !sessionPanel.isDestroyed()) {
-    sessionPanel.show();
-    return;
-  }
-  const bounds = getSessionPanelBounds();
-  sessionPanel = new BrowserWindow({
-    width: PANEL_WIDTH,
-    height: bounds.h,
-    x: bounds.x,
-    y: bounds.y,
-    transparent: true,
-    frame: false,
-    alwaysOnTop: true,
-    skipTaskbar: true,
-    resizable: false,
-    focusable: false,
-    hasShadow: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload-panel.js'),
-      contextIsolation: true,
-      nodeIntegration: false,
-    },
-  });
-  sessionPanel.setIgnoreMouseEvents(true);
-  sessionPanel.loadFile('renderer/sessions-panel.html');
-  sessionPanel.webContents.once('did-finish-load', () => {
-    pushSessionsToPanel();
-  });
-  sessionPanel.on('closed', () => { sessionPanel = null; });
-}
-
-function closeSessionPanel() {
-  if (sessionPanel && !sessionPanel.isDestroyed()) {
-    sessionPanel.close();
-    sessionPanel = null;
-  }
-}
-
-function repositionPanel() {
-  if (!sessionPanel || sessionPanel.isDestroyed()) return;
-  const bounds = getSessionPanelBounds();
-  sessionPanel.setBounds({ x: bounds.x, y: bounds.y, width: PANEL_WIDTH, height: bounds.h });
-}
-
-function pushSessionsToPanel() {
-  if (!sessionPanel || sessionPanel.isDestroyed()) return;
+function pushSessionsToRenderer() {
+  if (!win || win.isDestroyed() || !sessionsVisible) return;
   const sessions = readSessionsFile();
-  sessionPanel.webContents.send('sessions-data', { sessions });
+  win.webContents.send('sessions-data', { sessions });
 }
 
 function createWindow() {
@@ -544,10 +490,6 @@ function createWindow() {
 
   win.loadFile('renderer/index.html');
 
-  // Keep sessions panel positioned to the right when pet is dragged
-  win.on('move', repositionPanel);
-  win.on('resize', repositionPanel);
-
   if (process.platform === 'darwin') {
     const iconPath = path.join(__dirname, 'renderer', 'assets', 'dock-icon.png');
     app.dock.setIcon(iconPath);
@@ -562,9 +504,9 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {
     startPolling();
     startMouseTracking();
-    // Open sessions panel if previously enabled
+    // Open sessions sidebar if previously enabled
     if (loadPetConfig().showSessions) {
-      openSessionPanel();
+      toggleSessionsSidebar(true);
     }
   });
 }
