@@ -16,27 +16,29 @@
       color: #ccc;
     }
     #panel {
-      background: rgba(12, 12, 20, 0.82);
-      border: 1px solid rgba(255, 255, 255, 0.10);
-      border-radius: 8px;
+      background: rgba(12, 12, 20, 0.85);
+      border: 2px solid #8b6914;
+      border-left: 1px solid #6b5010;
+      border-radius: 0 6px 6px 0;
       padding: 8px 10px;
-      margin: 4px;
-      max-height: calc(100vh - 8px);
+      margin: 0;
+      height: 100vh;
       overflow-y: auto;
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
+      box-shadow: inset 0 0 12px rgba(139, 105, 20, 0.08);
     }
     #panel::-webkit-scrollbar { width: 4px; }
     #panel::-webkit-scrollbar-track { background: transparent; }
     #panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
     .section-label {
       font-size: 9px;
-      color: #666;
+      color: #8b7530;
       text-transform: uppercase;
       letter-spacing: 1px;
       margin: 6px 0 3px 0;
       padding-bottom: 2px;
-      border-bottom: 1px solid rgba(255,255,255,0.06);
+      border-bottom: 1px solid rgba(139, 105, 20, 0.2);
     }
     .section-label:first-child { margin-top: 0; }
     .session-row {

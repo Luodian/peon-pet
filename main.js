@@ -454,14 +454,13 @@ function buildDockMenu() {
 }
 
 const PANEL_WIDTH = 200;
-const PANEL_HEIGHT = 360;
-const PANEL_GAP = 4;
+const PANEL_GAP = -1; // overlap by 1px so borders merge
 
-function getSessionPanelPosition() {
-  if (!win || win.isDestroyed()) return { x: 100, y: 100 };
+function getSessionPanelBounds() {
+  if (!win || win.isDestroyed()) return { x: 100, y: 100, h: 150 };
   const [wx, wy] = win.getPosition();
-  const [ww] = win.getSize();
-  return { x: wx + ww + PANEL_GAP, y: wy };
+  const [ww, wh] = win.getSize();
+  return { x: wx + ww + PANEL_GAP, y: wy, h: wh };
 }
 
 function openSessionPanel() {
@@ -469,12 +468,12 @@ function openSessionPanel() {
     sessionPanel.show();
     return;
   }
-  const pos = getSessionPanelPosition();
+  const bounds = getSessionPanelBounds();
   sessionPanel = new BrowserWindow({
     width: PANEL_WIDTH,
-    height: PANEL_HEIGHT,
-    x: pos.x,
-    y: pos.y,
+    height: bounds.h,
+    x: bounds.x,
+    y: bounds.y,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -505,8 +504,8 @@ function closeSessionPanel() {
 
 function repositionPanel() {
   if (!sessionPanel || sessionPanel.isDestroyed()) return;
-  const pos = getSessionPanelPosition();
-  sessionPanel.setPosition(pos.x, pos.y);
+  const bounds = getSessionPanelBounds();
+  sessionPanel.setBounds({ x: bounds.x, y: bounds.y, width: PANEL_WIDTH, height: bounds.h });
 }
 
 function pushSessionsToPanel() {
