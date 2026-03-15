@@ -10,6 +10,7 @@ const {
 } = require('./lib/session-tracker');
 
 let win;
+let sessionPanel;
 let petVisible = true;
 
 const CHARACTERS = {
@@ -91,7 +92,7 @@ function getActiveCharId() {
 
 function registerCharacterProtocol() {
   const assetsDir = path.join(__dirname, 'renderer', 'assets');
-  const fallback = { 'borders.png': 'orc-borders.png', 'bg.png': 'bg-pixel.png', 'dock-icon.png': 'orc-dock-icon.png' };
+  const fallback = { 'borders.png': 'orc-borders.png', 'bg.png': 'bg-pixel.png', 'dock-icon.png': 'dock-icon.png' };
 
   protocol.handle('peon-asset', async (request) => {
     const filename = new URL(request.url).hostname;
@@ -142,6 +143,23 @@ ipcMain.handle('get-volume', () => {
   return cfg.volume ?? 0.3;
 });
 
+ipcMain.handle('get-show-sessions', () => {
+  return loadPetConfig().showSessions ?? false;
+});
+
+ipcMain.handle('toggle-sessions-panel', () => {
+  const cfg = loadPetConfig();
+  const show = !(cfg.showSessions ?? false);
+  cfg.showSessions = show;
+  savePetConfig(cfg);
+  if (show) {
+    openSessionPanel();
+  } else {
+    closeSessionPanel();
+  }
+  return show;
+});
+
 ipcMain.on('show-context-menu', () => {
   if (!win || win.isDestroyed()) return;
   const cfg = loadPetConfig();
@@ -189,6 +207,14 @@ ipcMain.on('show-context-menu', () => {
     { label: 'Character', submenu: charItems },
     { type: 'separator' },
     { label: 'Sessions', submenu: buildSessionMenuItems() },
+    { type: 'separator' },
+    { label: (loadPetConfig().showSessions ?? false) ? '✓ Sessions Panel' : '  Sessions Panel', click() {
+      const c = loadPetConfig();
+      const show = !(c.showSessions ?? false);
+      c.showSessions = show;
+      savePetConfig(c);
+      if (show) openSessionPanel(); else closeSessionPanel();
+    }},
     { type: 'separator' },
     { label: petVisible ? 'Hide Pet' : 'Show Pet', click() {
       if (!win || win.isDestroyed()) return;
@@ -349,6 +375,7 @@ function startPolling() {
         cwd: sessionCwds.get(s.id) || null,
       }));
       win.webContents.send('session-update', { sessions: sessionsWithCwd });
+      pushSessionsToPanel();
     }
 
     const anim = EVENT_TO_ANIM[event];
@@ -356,6 +383,9 @@ function startPolling() {
       win.webContents.send('peon-event', { anim, event });
     }
   }, 200);
+
+  // Periodically refresh the sessions panel so "time ago" stays current
+  setInterval(() => pushSessionsToPanel(), 5000);
 
   // Also poll sessions file for sub-agent activity (keeps pet awake)
   setInterval(() => {
@@ -380,6 +410,7 @@ function startPolling() {
         cwd: sessionCwds.get(ss.id) || null,
       }));
       win.webContents.send('session-update', { sessions: sessionsWithCwd });
+      pushSessionsToPanel();
     }
   }, 1000);
 }
@@ -422,6 +453,68 @@ function buildDockMenu() {
   ]);
 }
 
+const PANEL_WIDTH = 200;
+const PANEL_HEIGHT = 360;
+const PANEL_GAP = 4;
+
+function getSessionPanelPosition() {
+  if (!win || win.isDestroyed()) return { x: 100, y: 100 };
+  const [wx, wy] = win.getPosition();
+  const [ww] = win.getSize();
+  return { x: wx + ww + PANEL_GAP, y: wy };
+}
+
+function openSessionPanel() {
+  if (sessionPanel && !sessionPanel.isDestroyed()) {
+    sessionPanel.show();
+    return;
+  }
+  const pos = getSessionPanelPosition();
+  sessionPanel = new BrowserWindow({
+    width: PANEL_WIDTH,
+    height: PANEL_HEIGHT,
+    x: pos.x,
+    y: pos.y,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    focusable: false,
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload-panel.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  sessionPanel.setIgnoreMouseEvents(true);
+  sessionPanel.loadFile('renderer/sessions-panel.html');
+  sessionPanel.webContents.once('did-finish-load', () => {
+    pushSessionsToPanel();
+  });
+  sessionPanel.on('closed', () => { sessionPanel = null; });
+}
+
+function closeSessionPanel() {
+  if (sessionPanel && !sessionPanel.isDestroyed()) {
+    sessionPanel.close();
+    sessionPanel = null;
+  }
+}
+
+function repositionPanel() {
+  if (!sessionPanel || sessionPanel.isDestroyed()) return;
+  const pos = getSessionPanelPosition();
+  sessionPanel.setPosition(pos.x, pos.y);
+}
+
+function pushSessionsToPanel() {
+  if (!sessionPanel || sessionPanel.isDestroyed()) return;
+  const sessions = readSessionsFile();
+  sessionPanel.webContents.send('sessions-data', { sessions });
+}
+
 function createWindow() {
   const { width, height } = screen.getPrimaryDisplay().workAreaSize;
   const saved = loadPetConfig().window;
@@ -452,13 +545,12 @@ function createWindow() {
 
   win.loadFile('renderer/index.html');
 
+  // Keep sessions panel positioned to the right when pet is dragged
+  win.on('move', repositionPanel);
+  win.on('resize', repositionPanel);
+
   if (process.platform === 'darwin') {
-    const cfg = loadPetConfig();
-    const char = cfg.character || 'orc';
-    const customIcon = path.join(app.getPath('userData'), 'characters', char, 'dock-icon.png');
-    const iconPath = (char !== 'orc' && fs.existsSync(customIcon))
-      ? customIcon
-      : path.join(__dirname, 'renderer', 'assets', 'orc-dock-icon.png');
+    const iconPath = path.join(__dirname, 'renderer', 'assets', 'dock-icon.png');
     app.dock.setIcon(iconPath);
     app.dock.setMenu(buildDockMenu());
   }
@@ -471,6 +563,10 @@ function createWindow() {
   win.webContents.once('did-finish-load', () => {
     startPolling();
     startMouseTracking();
+    // Open sessions panel if previously enabled
+    if (loadPetConfig().showSessions) {
+      openSessionPanel();
+    }
   });
 }
 

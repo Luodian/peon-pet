@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      background: transparent;
+      -webkit-app-region: no-drag;
+    }
+    body {
+      font-family: 'SF Mono', Consolas, 'Courier New', monospace;
+      font-size: 11px;
+      color: #ccc;
+    }
+    #panel {
+      background: rgba(12, 12, 20, 0.82);
+      border: 1px solid rgba(255, 255, 255, 0.10);
+      border-radius: 8px;
+      padding: 8px 10px;
+      margin: 4px;
+      max-height: calc(100vh - 8px);
+      overflow-y: auto;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+    #panel::-webkit-scrollbar { width: 4px; }
+    #panel::-webkit-scrollbar-track { background: transparent; }
+    #panel::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+    .section-label {
+      font-size: 9px;
+      color: #666;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin: 6px 0 3px 0;
+      padding-bottom: 2px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .section-label:first-child { margin-top: 0; }
+    .session-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 0;
+      white-space: nowrap;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .dot.running { background: #44ff44; box-shadow: 0 0 4px #44ff44; }
+    .dot.idle    { background: #ddaa00; }
+    .dot.ended   { background: #444; }
+    .session-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #bbb;
+    }
+    .session-time {
+      color: #666;
+      font-size: 10px;
+      flex-shrink: 0;
+    }
+    .empty {
+      color: #555;
+      font-style: italic;
+      padding: 4px 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="panel">
+    <div class="empty">No sessions</div>
+  </div>
+  <script src="sessions-panel.js"></script>
+</body>
+</html>
