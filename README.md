@@ -2,6 +2,10 @@
 
 Your desktop coding companion — fully customizable, AI-generated, and reactive to your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions.
 
+<div align="center">
+<img src="docs/peon-pet.gif" alt="Peon Pet desktop demo" width="480" />
+</div>
+
 ## Install
 
 ```bash
@@ -78,16 +82,6 @@ Up to 10 dots appear above the character, one per tracked session:
 | **Gone** | Ended or >10min idle | Removed |
 
 Hover a dot to see the project folder and status.
-
----
-
-## Demo
-
-<div align="center">
-<video src="https://github.com/PeonPing/peon-pet/raw/master/docs/demo.mp4" autoplay loop muted playsinline width="480"></video>
-</div>
-
-> If the video doesn't render above, see [docs/demo.mp4](docs/demo.mp4) directly.
 
 ---
 
