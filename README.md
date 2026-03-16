@@ -8,18 +8,21 @@ Your desktop coding companion — fully customizable, AI-generated, and reactive
 
 ## Install
 
-```bash
-git clone https://github.com/PeonPing/peon-pet.git
-cd peon-pet
-npm install
-npm start
+**Copy to your Claude Code agent** — it will clone, install, set up hooks, and launch the pet for you:
+
+```
+Clone https://github.com/Luodian/peon-pet.git into ~/peon-pet, run npm install, then run python3 scripts/install-session-hook.py to register Claude Code hooks, and finally run ./install.sh to set up the macOS LaunchAgent so it starts at login. Launch the app with npm start.
 ```
 
-To auto-start at login:
+Or do it manually:
 
 ```bash
-./install.sh    # install macOS LaunchAgent
-./uninstall.sh  # remove it
+git clone https://github.com/Luodian/peon-pet.git ~/peon-pet
+cd ~/peon-pet
+npm install
+python3 scripts/install-session-hook.py   # register Claude Code hooks
+./install.sh                              # auto-start at login
+npm start                                 # launch now
 ```
 
 Requires macOS, Node.js 18+, and [Peon-Ping](https://peonping.com) for event hooks.
