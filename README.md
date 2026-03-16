@@ -98,13 +98,17 @@ Switch from the right-click menu. The change is instant.
 
 ## Controls
 
-Right-click the pet or dock icon:
+Right-click the pet or dock icon to access the full settings menu:
+
+<div align="center">
+<img src="docs/peon-pet-setting.jpg" alt="Right-click settings menu" width="480" />
+</div>
 
 - **Sound On/Off** — toggle Peon-Ping audio
 - **Volume** — 10% to 100% in steps
-- **Character** — switch between available characters
-- **Sessions** — view tracked sessions list
-- **Sessions Panel** — toggle inline sidebar
+- **Character** — hot-swap between built-in or custom characters
+- **Sessions** — view running, idle, and ended sessions
+- **Sessions Panel** — toggle the inline sidebar with live session details
 - **Hide/Show Pet** — toggle visibility without quitting
 - **Quit** — exit
 
