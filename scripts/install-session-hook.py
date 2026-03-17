@@ -2,19 +2,19 @@
 """Install peon-pet session hooks for Claude Code and Codex.
 
 Adds session-hook.py alongside existing Claude Code hooks and installs a
-Codex hooks.json entry, enabling the `codex_hooks` feature when possible.
+Codex hooks.json entry, enabling the `codex_hooks` feature with a minimal
+config.toml edit.
 Safe to run multiple times — it updates older peon-pet entries in place.
 """
 import json
-import subprocess
 from pathlib import Path
 
 CLAUDE_SETTINGS_FILE = Path.home() / '.claude' / 'settings.json'
 CODEX_CONFIG_DIR = Path.home() / '.codex'
+CODEX_CONFIG_FILE = CODEX_CONFIG_DIR / 'config.toml'
 CODEX_HOOKS_FILE = CODEX_CONFIG_DIR / 'hooks.json'
 HOOK_SCRIPT = Path(__file__).resolve().parent / 'session-hook.py'
 HOOK_MARKER = str(HOOK_SCRIPT)
-CODEX_BIN = 'codex'
 
 CLAUDE_COMMAND = f'python3 {HOOK_SCRIPT} --client claude-code'
 CODEX_COMMAND = f'python3 {HOOK_SCRIPT} --client codex'
@@ -149,27 +149,58 @@ def install_codex_hooks():
 
 
 def enable_codex_hooks_feature():
-    try:
-        result = subprocess.run(
-            [CODEX_BIN, 'features', 'enable', 'codex_hooks'],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except FileNotFoundError:
-        print('  ! codex CLI not found; enable `codex_hooks` manually in ~/.codex/config.toml')
-        return False
+    CODEX_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if CODEX_CONFIG_FILE.exists():
+        original = CODEX_CONFIG_FILE.read_text()
+    else:
+        original = ''
 
-    if result.returncode == 0:
+    updated, changed = upsert_toml_bool(original, 'features', 'codex_hooks', 'true')
+    if changed:
+        CODEX_CONFIG_FILE.write_text(updated)
         print('  ✓ codex_hooks feature enabled')
-        return True
+    else:
+        print('  ✓ codex_hooks feature already enabled')
+    return True
 
-    print('  ! failed to enable `codex_hooks` automatically')
-    if result.stderr.strip():
-        print(f'    {result.stderr.strip()}')
-    elif result.stdout.strip():
-        print(f'    {result.stdout.strip()}')
-    return False
+
+def upsert_toml_bool(text, section, key, value):
+    lines = text.splitlines()
+    section_header = f'[{section}]'
+    in_section = False
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith('[') and stripped.endswith(']'):
+            if in_section:
+                lines.insert(index, f'{key} = {value}')
+                return normalize_toml_lines(lines, text), True
+            in_section = stripped == section_header
+            continue
+        if in_section and stripped.startswith(f'{key} ='):
+            replacement = f'{key} = {value}'
+            if stripped == replacement:
+                return text if text.endswith('\n') or not text else text, False
+            indent = line[:len(line) - len(line.lstrip())]
+            lines[index] = f'{indent}{replacement}'
+            return normalize_toml_lines(lines, text), True
+
+    if in_section:
+        lines.append(f'{key} = {value}')
+        return normalize_toml_lines(lines, text), True
+
+    if lines:
+        lines.extend(['', section_header, f'{key} = {value}'])
+    else:
+        lines.extend([section_header, f'{key} = {value}'])
+    return normalize_toml_lines(lines, text), True
+
+
+def normalize_toml_lines(lines, original_text):
+    normalized = '\n'.join(lines)
+    if original_text.endswith('\n') or normalized:
+        normalized += '\n'
+    return normalized
 
 
 def main():
