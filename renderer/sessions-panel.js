@@ -9,6 +9,16 @@ function formatTimeAgo(ms) {
   return `${hr}h ago`;
 }
 
+function legacySessionTitle(id, session) {
+  const label = session.project || (session.cwd ? session.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8));
+  const typeTag = session.type === 'subagent' ? ' (agent)' : '';
+  return `${label}${typeTag}`;
+}
+
+function sessionTitle(id, session) {
+  return session.title || legacySessionTitle(id, session);
+}
+
 function render(sessions) {
   if (!sessions || Object.keys(sessions).length === 0) {
     panel.innerHTML = '<div class="empty">No sessions</div>';
@@ -22,9 +32,7 @@ function render(sessions) {
 
   for (const [id, s] of Object.entries(sessions)) {
     const age = now - (s.last_event_at || 0);
-    const label = s.project || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8));
-    const typeTag = s.type === 'subagent' ? ' (agent)' : '';
-    const entry = { id, label, typeTag, age, ...s };
+    const entry = { id, title: sessionTitle(id, s), age, ...s };
 
     if (s.ended) {
       ended.push(entry);
@@ -44,7 +52,7 @@ function render(sessions) {
     for (const s of running.sort((a, b) => a.age - b.age)) {
       html += `<div class="session-row">
         <span class="dot running"></span>
-        <span class="session-name">${esc(s.label)}${esc(s.typeTag)}</span>
+        <span class="session-name">${esc(s.title)}</span>
         <span class="session-time">${formatTimeAgo(s.age * 1000)}</span>
       </div>`;
     }
@@ -55,7 +63,7 @@ function render(sessions) {
     for (const s of idle.sort((a, b) => a.age - b.age)) {
       html += `<div class="session-row">
         <span class="dot idle"></span>
-        <span class="session-name">${esc(s.label)}${esc(s.typeTag)}</span>
+        <span class="session-name">${esc(s.title)}</span>
         <span class="session-time">${formatTimeAgo(s.age * 1000)}</span>
       </div>`;
     }
@@ -66,7 +74,7 @@ function render(sessions) {
     for (const s of ended.sort((a, b) => a.age - b.age).slice(0, 10)) {
       html += `<div class="session-row">
         <span class="dot ended"></span>
-        <span class="session-name">${esc(s.label)}${esc(s.typeTag)}</span>
+        <span class="session-name">${esc(s.title)}</span>
         <span class="session-time">${formatTimeAgo(s.age * 1000)}</span>
       </div>`;
     }

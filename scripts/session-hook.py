@@ -1,16 +1,62 @@
 #!/usr/bin/env python3
-"""Lightweight Claude Code hook for peon-pet session tracking.
+"""Lightweight session hook for peon-pet session tracking.
 
-Captures ALL events (including sub-agents) and writes to sessions.json.
-Runs alongside peon-ping — does NOT play sounds, only tracks session state.
+Captures Claude Code and Codex hook events, then writes normalized session
+metadata to sessions.json. Runs alongside peon-ping — it does NOT play sounds,
+only tracks session state.
 """
-import json, sys, os, time
+import argparse
+import json
+import os
+import sys
+import time
 from pathlib import Path
 
 SESSIONS_FILE = Path.home() / '.config' / 'peon-pet' / 'sessions.json'
 MAX_AGE_HOURS = 2  # prune sessions older than 2 hours
+CLIENT_TITLES = {
+    'claude-code': 'Claude Code',
+    'codex': 'Codex',
+}
+CLAUDE_SUBAGENT_SOURCES = {'subagent', 'task'}
+CODEX_SESSION_START_SOURCES = {'startup', 'resume', 'clear'}
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument('--client', choices=sorted(CLIENT_TITLES))
+    return parser.parse_args()
+
+
+def detect_client(event_data, forced_client=None):
+    if forced_client:
+        return forced_client
+
+    source = event_data.get('source', '')
+    if source in CODEX_SESSION_START_SOURCES:
+        return 'codex'
+    if event_data.get('stop_hook_active') is not None:
+        return 'codex'
+    if event_data.get('workspace_roots') or event_data.get('conversation_id'):
+        return 'claude-code'
+    return 'claude-code'
+
+
+def display_name(session_id, cwd):
+    project = os.path.basename(cwd) if cwd else ''
+    return project or session_id[:8], project
+
+
+def build_title(name, client, session_type):
+    client_title = CLIENT_TITLES.get(client, client or 'Unknown')
+    if session_type == 'subagent':
+        return f'{name} ({client_title} agent)'
+    return f'{name} ({client_title})'
+
 
 def main():
+    args = parse_args()
+
     try:
         event_data = json.load(sys.stdin)
     except Exception:
@@ -24,6 +70,7 @@ def main():
     if not cwd and roots:
         cwd = roots[0]
     source = event_data.get('source', '')
+    client = detect_client(event_data, args.client)
 
     if not session_id:
         return
@@ -41,28 +88,44 @@ def main():
 
     # Prune old sessions
     cutoff = now - MAX_AGE_HOURS * 3600
-    sessions = {k: v for k, v in sessions.items()
-                if v.get('last_event_at', 0) > cutoff}
+    sessions = {
+        key: value
+        for key, value in sessions.items()
+        if value.get('last_event_at', 0) > cutoff
+    }
 
-    # Determine session type
-    is_subagent = source in ('subagent', 'task')
+    is_subagent = source in CLAUDE_SUBAGENT_SOURCES
+    session_type = 'subagent' if is_subagent else 'main'
+    name, project = display_name(session_id, cwd)
 
-    # Update or create session entry
     if session_id in sessions:
-        s = sessions[session_id]
-        s['last_event_at'] = now
-        s['last_event'] = event
-        if cwd and not s.get('cwd'):
-            s['cwd'] = cwd
-            s['project'] = os.path.basename(cwd)
-        if event in ('SessionEnd',):
-            s['ended'] = True
-            s['ended_at'] = now
+        session = sessions[session_id]
+        if cwd:
+            session['cwd'] = cwd
+            session['project'] = project
+        session['client'] = client
+        session['type'] = (
+            'subagent'
+            if session.get('type') == 'subagent' or is_subagent
+            else 'main'
+        )
+        session['title'] = build_title(
+            session.get('project') or name,
+            session['client'],
+            session['type'],
+        )
+        session['last_event_at'] = now
+        session['last_event'] = event
+        if event == 'SessionEnd':
+            session['ended'] = True
+            session['ended_at'] = now
     else:
         sessions[session_id] = {
-            'type': 'subagent' if is_subagent else 'main',
+            'type': session_type,
+            'client': client,
             'cwd': cwd,
-            'project': os.path.basename(cwd) if cwd else '',
+            'project': project,
+            'title': build_title(name, client, session_type),
             'started_at': now,
             'last_event_at': now,
             'last_event': event,
@@ -70,11 +133,11 @@ def main():
             'ended_at': None,
         }
 
-    # Write atomically
     tmp = str(SESSIONS_FILE) + '.tmp'
-    with open(tmp, 'w') as f:
-        json.dump(sessions, f, indent=2)
+    with open(tmp, 'w') as handle:
+        json.dump(sessions, handle, indent=2)
     os.replace(tmp, str(SESSIONS_FILE))
+
 
 if __name__ == '__main__':
     main()

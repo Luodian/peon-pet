@@ -264,6 +264,27 @@ function formatTimeAgo(ms) {
   return `${hr}h ago`;
 }
 
+function legacySessionTitle(id, s) {
+  const label = s.project || path.basename(s.cwd || '') || id.slice(0, 8);
+  const typeTag = s.type === 'subagent' ? ' (agent)' : '';
+  return `${label}${typeTag}`;
+}
+
+function getSessionTitle(id, s) {
+  return s.title || legacySessionTitle(id, s);
+}
+
+function attachSessionMetadata(sessions) {
+  const fileData = readSessionsFile();
+  return sessions.map((session) => {
+    const meta = fileData[session.id] || {};
+    const cwd = sessionCwds.get(session.id) || meta.cwd || null;
+    const merged = { ...meta, ...session, cwd };
+    merged.title = getSessionTitle(session.id, merged);
+    return merged;
+  });
+}
+
 function classifySession(id, s) {
   const now = Date.now();
   const trackerEntry = tracker.entries().find(([tid]) => tid === id);
@@ -290,9 +311,7 @@ function buildSessionMenuItems() {
     const trackerEntry = tracker.entries().find(([tid]) => tid === id);
     const inTracker = !!trackerEntry;
     const age = inTracker ? (now - trackerEntry[1]) / 1000 : (now / 1000 - (s.last_event_at || 0));
-    const label = s.project || path.basename(s.cwd || '') || id.slice(0, 8);
-    const typeTag = s.type === 'subagent' ? ' (agent)' : '';
-    const entry = { id, label, typeTag, age, ...s };
+    const entry = { id, title: getSessionTitle(id, s), age, ...s };
     const status = classifySession(id, s);
 
     if (status === 'running') running.push(entry);
@@ -308,7 +327,7 @@ function buildSessionMenuItems() {
     items.push({ label: '— Running —', enabled: false });
     for (const s of running.sort((a, b) => a.age - b.age)) {
       items.push({
-        label: `🟢 ${s.label}${s.typeTag}  ${formatTimeAgo(s.age * 1000)}`,
+        label: `🟢 ${s.title}  ${formatTimeAgo(s.age * 1000)}`,
         enabled: false,
       });
     }
@@ -319,7 +338,7 @@ function buildSessionMenuItems() {
     items.push({ label: '— Idle —', enabled: false });
     for (const s of idle.sort((a, b) => a.age - b.age)) {
       items.push({
-        label: `🟡 ${s.label}${s.typeTag}  ${formatTimeAgo(s.age * 1000)}`,
+        label: `🟡 ${s.title}  ${formatTimeAgo(s.age * 1000)}`,
         enabled: false,
       });
     }
@@ -330,7 +349,7 @@ function buildSessionMenuItems() {
     items.push({ label: '— Ended —', enabled: false });
     for (const s of ended.sort((a, b) => a.age - b.age).slice(0, 10)) {
       items.push({
-        label: `⚫ ${s.label}${s.typeTag}  ${formatTimeAgo(s.age * 1000)}`,
+        label: `⚫ ${s.title}  ${formatTimeAgo(s.age * 1000)}`,
         enabled: false,
       });
     }
@@ -380,11 +399,7 @@ function startPolling() {
 
     if (win && !win.isDestroyed()) {
       const sessions = buildSessionStates(tracker.entries(), now, HOT_MS, WARM_MS, 10);
-      const sessionsWithCwd = sessions.map(s => ({
-        ...s,
-        cwd: sessionCwds.get(s.id) || null,
-      }));
-      win.webContents.send('session-update', { sessions: sessionsWithCwd });
+      win.webContents.send('session-update', { sessions: attachSessionMetadata(sessions) });
       pushSessionsToRenderer();
     }
 
@@ -415,11 +430,7 @@ function startPolling() {
         }
       }
       const sessStates = buildSessionStates(tracker.entries(), Date.now(), HOT_MS, WARM_MS, 10);
-      const sessionsWithCwd = sessStates.map(ss => ({
-        ...ss,
-        cwd: sessionCwds.get(ss.id) || null,
-      }));
-      win.webContents.send('session-update', { sessions: sessionsWithCwd });
+      win.webContents.send('session-update', { sessions: attachSessionMetadata(sessStates) });
       pushSessionsToRenderer();
     }
   }, 1000);
@@ -473,7 +484,7 @@ function pushSessionsToRenderer() {
     const trackerEntry = tracker.entries().find(([tid]) => tid === id);
     const inTracker = !!trackerEntry;
     const age = inTracker ? (now - trackerEntry[1]) / 1000 : (now / 1000 - (s.last_event_at || 0));
-    merged[id] = { ...s, _status: classifySession(id, s), _age: age };
+    merged[id] = { ...s, title: getSessionTitle(id, s), _status: classifySession(id, s), _age: age };
   }
 
   win.webContents.send('sessions-data', { sessions: merged });

@@ -1,62 +1,183 @@
 #!/usr/bin/env python3
-"""Add peon-pet session-hook to Claude Code settings.json.
+"""Install peon-pet session hooks for Claude Code and Codex.
 
-Adds session-hook.py alongside existing peon-ping hooks for all events.
-Safe to run multiple times — skips if already installed.
+Adds session-hook.py alongside existing Claude Code hooks and installs a
+Codex hooks.json entry, enabling the `codex_hooks` feature when possible.
+Safe to run multiple times — it updates older peon-pet entries in place.
 """
-import json, sys
+import json
+import subprocess
 from pathlib import Path
 
-SETTINGS_FILE = Path.home() / '.claude' / 'settings.json'
+CLAUDE_SETTINGS_FILE = Path.home() / '.claude' / 'settings.json'
+CODEX_CONFIG_DIR = Path.home() / '.codex'
+CODEX_HOOKS_FILE = CODEX_CONFIG_DIR / 'hooks.json'
 HOOK_SCRIPT = Path(__file__).resolve().parent / 'session-hook.py'
+HOOK_MARKER = str(HOOK_SCRIPT)
+CODEX_BIN = 'codex'
 
-HOOK_ENTRY = {
+CLAUDE_COMMAND = f'python3 {HOOK_SCRIPT} --client claude-code'
+CODEX_COMMAND = f'python3 {HOOK_SCRIPT} --client codex'
+
+CLAUDE_HOOK_ENTRY = {
     'type': 'command',
-    'command': f'python3 {HOOK_SCRIPT}',
+    'command': CLAUDE_COMMAND,
     'timeout': 5,
     'async': True,
 }
 
-# All Claude Code hook events we want to track
-EVENTS = [
+CODEX_HOOK_ENTRY = {
+    'type': 'command',
+    'command': CODEX_COMMAND,
+    'timeout': 5,
+}
+
+CLAUDE_EVENTS = [
     'SessionStart', 'SessionEnd', 'SubagentStart',
     'UserPromptSubmit', 'Stop', 'Notification',
     'PermissionRequest', 'PostToolUseFailure', 'PreCompact',
 ]
 
-def main():
-    settings = json.loads(SETTINGS_FILE.read_text())
+CODEX_EVENTS = ['SessionStart', 'Stop']
+
+
+def load_json(path, default):
+    if not path.exists():
+        return default
+    return json.loads(path.read_text())
+
+
+def write_json(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + '\n')
+
+
+def find_existing_hook(event_groups):
+    for group in event_groups:
+        for hook in group.get('hooks', []):
+            if HOOK_MARKER in hook.get('command', ''):
+                return hook
+    return None
+
+
+def upsert_event_hook(event_groups, entry, default_group):
+    existing = find_existing_hook(event_groups)
+    if existing is not None:
+        if existing == entry:
+            return 'already'
+        existing.clear()
+        existing.update(entry)
+        return 'updated'
+
+    if not event_groups:
+        event_groups.append(default_group(entry))
+        return 'created'
+
+    event_groups[0].setdefault('hooks', []).append(entry.copy())
+    return 'added'
+
+
+def default_claude_group(entry):
+    return {'matcher': '', 'hooks': [entry.copy()]}
+
+
+def default_codex_group(event, entry):
+    group = {'hooks': [entry.copy()]}
+    if event == 'SessionStart':
+        group['matcher'] = ''
+    return group
+
+
+def install_claude_hooks():
+    settings = load_json(CLAUDE_SETTINGS_FILE, {})
     hooks = settings.setdefault('hooks', {})
-    marker = str(HOOK_SCRIPT)
     changed = False
 
-    for event in EVENTS:
-        event_hooks = hooks.get(event, [])
-        if not event_hooks:
-            # No existing hooks for this event — create a new entry
-            event_hooks = [{'matcher': '', 'hooks': [HOOK_ENTRY.copy()]}]
-            hooks[event] = event_hooks
-            changed = True
-            print(f'  + {event} (new)')
-            continue
-
-        # Check if session-hook is already in the first matcher group
-        group = event_hooks[0]
-        group_hooks = group.get('hooks', [])
-        already = any(marker in h.get('command', '') for h in group_hooks)
-        if already:
-            print(f'  ✓ {event} (already installed)')
-            continue
-
-        group_hooks.append(HOOK_ENTRY.copy())
-        changed = True
-        print(f'  + {event}')
+    print('Claude Code:')
+    for event in CLAUDE_EVENTS:
+        event_groups = hooks.setdefault(event, [])
+        result = upsert_event_hook(event_groups, CLAUDE_HOOK_ENTRY.copy(), default_claude_group)
+        changed = changed or result != 'already'
+        marker = {
+            'already': '✓',
+            'updated': '↺',
+            'created': '+',
+            'added': '+',
+        }[result]
+        suffix = {
+            'already': 'already installed',
+            'updated': 'updated',
+            'created': 'new',
+            'added': 'added',
+        }[result]
+        print(f'  {marker} {event} ({suffix})')
 
     if changed:
-        SETTINGS_FILE.write_text(json.dumps(settings, indent=2) + '\n')
-        print('\nDone — session-hook installed.')
-    else:
-        print('\nNo changes needed — all hooks already installed.')
+        write_json(CLAUDE_SETTINGS_FILE, settings)
+
+
+def install_codex_hooks():
+    hooks_config = load_json(CODEX_HOOKS_FILE, {'hooks': {}})
+    hooks = hooks_config.setdefault('hooks', {})
+    changed = False
+
+    print('Codex:')
+    for event in CODEX_EVENTS:
+        event_groups = hooks.setdefault(event, [])
+        result = upsert_event_hook(
+            event_groups,
+            CODEX_HOOK_ENTRY.copy(),
+            lambda entry, event_name=event: default_codex_group(event_name, entry),
+        )
+        changed = changed or result != 'already'
+        marker = {
+            'already': '✓',
+            'updated': '↺',
+            'created': '+',
+            'added': '+',
+        }[result]
+        suffix = {
+            'already': 'already installed',
+            'updated': 'updated',
+            'created': 'new',
+            'added': 'added',
+        }[result]
+        print(f'  {marker} {event} ({suffix})')
+
+    if changed:
+        write_json(CODEX_HOOKS_FILE, hooks_config)
+
+
+def enable_codex_hooks_feature():
+    try:
+        result = subprocess.run(
+            [CODEX_BIN, 'features', 'enable', 'codex_hooks'],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except FileNotFoundError:
+        print('  ! codex CLI not found; enable `codex_hooks` manually in ~/.codex/config.toml')
+        return False
+
+    if result.returncode == 0:
+        print('  ✓ codex_hooks feature enabled')
+        return True
+
+    print('  ! failed to enable `codex_hooks` automatically')
+    if result.stderr.strip():
+        print(f'    {result.stderr.strip()}')
+    elif result.stdout.strip():
+        print(f'    {result.stdout.strip()}')
+    return False
+
+
+def main():
+    install_claude_hooks()
+    install_codex_hooks()
+    enable_codex_hooks_feature()
+    print('\nDone — peon-pet session hooks are installed for Claude Code and Codex.')
+
 
 if __name__ == '__main__':
     main()

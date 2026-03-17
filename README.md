@@ -1,6 +1,6 @@
 # Peon Pet
 
-Your desktop coding companion — fully customizable, AI-generated, and reactive to your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) sessions.
+Your desktop coding companion — fully customizable, AI-generated, and reactive to your [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and Codex sessions.
 
 <div align="center">
 <img src="docs/peon-pet.gif" alt="Peon Pet desktop demo" width="480" />
@@ -8,10 +8,10 @@ Your desktop coding companion — fully customizable, AI-generated, and reactive
 
 ## Install
 
-**Copy to your Claude Code agent** — it will clone, install, set up hooks, and launch the pet for you:
+**Copy to your coding agent** — it will clone, install, set up hooks, and launch the pet for you:
 
 ```
-Clone https://github.com/Luodian/peon-pet.git into ~/peon-pet, run npm install, then run python3 scripts/install-session-hook.py to register Claude Code hooks, and finally run ./install.sh to set up the macOS LaunchAgent so it starts at login. Launch the app with npm start.
+Clone https://github.com/Luodian/peon-pet.git into ~/peon-pet, run npm install, then run python3 scripts/install-session-hook.py to register Claude Code and Codex hooks, and finally run ./install.sh to set up the macOS LaunchAgent so it starts at login. Launch the app with npm start.
 ```
 
 Or do it manually:
@@ -20,7 +20,7 @@ Or do it manually:
 git clone https://github.com/Luodian/peon-pet.git ~/peon-pet
 cd ~/peon-pet
 npm install
-python3 scripts/install-session-hook.py   # register Claude Code hooks
+python3 scripts/install-session-hook.py   # register Claude Code + Codex hooks
 ./install.sh                              # auto-start at login
 npm start                                 # launch now
 ```
@@ -66,7 +66,7 @@ Here's a cat character generated entirely by Gemini — from prompt to desktop i
 
 Peon Pet reads a state file written by [Peon-Ping](https://peonping.com) hooks. When Claude Code fires events (prompt submit, task complete, permission request), the hook writes to `~/.claude/hooks/peon-ping/.state.json`. Peon Pet polls this file at 200ms intervals and triggers the matching animation.
 
-A separate Python hook (`scripts/session-hook.py`) tracks session lifecycle across main sessions and sub-agents, writing to `~/.config/peon-pet/sessions.json`.
+A separate Python hook (`scripts/session-hook.py`) tracks session lifecycle across Claude Code and Codex sessions, writing to `~/.config/peon-pet/sessions.json`. Session titles include the client name so the same repo can show up as distinct Claude Code and Codex entries.
 
 ```
 Claude Code event
@@ -130,13 +130,17 @@ Settings persist in `~/.config/peon-pet/config.json`:
 
 ## Session Hook Setup
 
-To enable full session tracking (including sub-agents):
+To enable full session tracking for Claude Code and Codex:
 
 ```bash
 python3 scripts/install-session-hook.py
 ```
 
-Or manually add `scripts/session-hook.py` as a Claude Code hook for all events.
+This installs:
+
+- Claude Code hooks in `~/.claude/settings.json`
+- Codex hooks in `~/.codex/hooks.json`
+- the Codex `codex_hooks` feature flag when the `codex` CLI is available
 
 ## Development
 

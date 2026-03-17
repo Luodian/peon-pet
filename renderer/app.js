@@ -429,8 +429,7 @@ canvas.addEventListener('mousemove', (e) => {
     const status = s.hot ? '<span style="color:#44ff44">active</span>'
                          : s.warm ? '<span style="color:#1aaa1a">idle</span>'
                          : '<span style="color:#555">cold</span>';
-    const label = s.cwd ? s.cwd.split('/').filter(Boolean).pop() : ('\u2026' + s.id.slice(-8));
-    html = `${label} &bull; ${status}`;
+    html = `${escHtml(sessionTitle(s))} &bull; ${status}`;
   } else {
     const active = currentSessions.filter(s => s.hot).length;
     const total  = currentSessions.length;
@@ -438,7 +437,7 @@ canvas.addEventListener('mousemove', (e) => {
       html = 'Pet';
     } else {
       const names = currentSessions
-        .map(s => s.cwd ? s.cwd.split('/').filter(Boolean).pop() : null)
+        .map(s => escHtml(sessionTitle(s)))
         .filter(Boolean);
       html = names.length ? names.join('<br>') : `${active}/${total} sessions`;
     }
@@ -495,6 +494,16 @@ function escHtml(str) {
   return d.innerHTML;
 }
 
+function legacySessionTitle(id, session) {
+  const label = session.project || (session.cwd ? session.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8));
+  const typeTag = session.type === 'subagent' ? ' (agent)' : '';
+  return `${label}${typeTag}`;
+}
+
+function sessionTitle(session) {
+  return session.title || legacySessionTitle(session.id, session);
+}
+
 function renderSidebar(sessions) {
   if (!sidebar.classList.contains('visible')) return;
   if (!sessions || Object.keys(sessions).length === 0) {
@@ -503,10 +512,8 @@ function renderSidebar(sessions) {
   }
   const running = [], idle = [], ended = [];
   for (const [id, s] of Object.entries(sessions)) {
-    const label = s.project || (s.cwd ? s.cwd.split('/').filter(Boolean).pop() : id.slice(0, 8));
-    const typeTag = s.type === 'subagent' ? ' (agent)' : '';
     const age = s._age || 0;
-    const entry = { id, label, typeTag, age, ...s };
+    const entry = { id, title: s.title || legacySessionTitle(id, s), age, ...s };
     const status = s._status || 'ended';
     if (status === 'running') running.push(entry);
     else if (status === 'idle') idle.push(entry);
@@ -514,7 +521,7 @@ function renderSidebar(sessions) {
   }
   let html = '';
   const row = (dotClass, nameClass, s) =>
-    `<div class="session-row"><span class="sdot ${dotClass}"></span><span class="session-name ${nameClass}">${escHtml(s.label)}${escHtml(s.typeTag)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
+    `<div class="session-row"><span class="sdot ${dotClass}"></span><span class="session-name ${nameClass}">${escHtml(s.title)}</span><span class="session-time">${formatTimeAgo(s.age * 1000)}</span></div>`;
 
   if (running.length > 0) {
     html += '<div class="section-label">Running</div>';
